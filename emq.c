@@ -8,68 +8,67 @@
 #include <arpa/inet.h>
 
 #include "emq.h"
-emq_t g_emq;
 
 
-void emq_init(void) {
 
-    g_emq.head = 0;
-   g_emq.tail = 0;
-    g_emq.size = EMQ_FIFO_DEPTH_MAX; //size;
-    //pthread_mutex_init(&p_q->lock, NULL);
-    pthread_spin_init(&g_emq.lock, PTHREAD_PROCESS_SHARED);
+void emq_init(emq_t  *p_emq {
+    p_emq->head = 0;
+   p_emq->tail = 0;
+    pthread_spin_init(&p_emq->lock, PTHREAD_PROCESS_SHARED);
 }
 
 
-int emq_available()
+inline int emq_available(emq_t  *p_emq )
 {
-	if (g_emq.tail < g_emq.head)
-		return g_emq.head - g_emq.tail - 1;
+	if (p_emq->.tail < p_emq->head)
+		return p_emq->head - p_emq->tail - 1;
 	else
-		return g_emq.head + (g_emq.size - g_emq.tail);
+		return p_emq->head + (EMQ_FIFO_DEPTH_MAX - p_emq->.tail);
 }
 
 
-void emq_write( emq_msg_t *p_msg){
+void emq_write( emq_t  *p_emq , emq_msg_t *p_msg){
     //pthread_mutex_lock(&p_q->lock);
-    pthread_spin_lock(&g_emq.lock);
+    pthread_spin_lock(&p_emq->lock);
     if (emq_available() == 0) // when queue is full
     {
-        printf("xQueue is full\n");
+        //printf("xQueue is full\n");
         p_msg->length = 0;
     }
     else
     {
-        memcpy(&g_emq.event[g_emq.tail],p_msg, sizeof(emq_msg_t));
+       // memcpy(&p_emq->event[p_emq->tail],p_msg, sizeof(emq_msg_t));
+        p_emq->event[p_emq->tail].cmd        = p_msg.cmd;
+        p_emq->event[p_emq->tail].src           = p_msg.src;
+        p_emq->event[p_emq->tail].length    = p_msg.length;
         //printf("=>%s write event[%d]", p_q->name, p_q->tail);
-        (g_emq.tail)++;
-        g_emq.write_cnt++;
-        (g_emq.tail) %= g_emq.size;
-        g_emq.depth++;
+        (p_emq->tail)++;
+        (p_emq->tail) %= EMQ_FIFO_DEPTH_MAX;
     }
     //pthread_mutex_unlock(&p_q->lock);
-    pthread_spin_unlock(&g_emq.lock);
+    pthread_spin_unlock(&p_emq->lock);
 }   
 
 
 
-void emq_read(emq_msg_t *p_msg){
+void emq_read(emq_t  *p_emq , emq_msg_t *p_msg){
     //pthread_mutex_lock(&p_q->lock);
-    pthread_spin_lock(&g_emq.lock);
-    if (g_emq.head != g_emq.tail){
+    pthread_spin_lock(&p_emq->lock);
+    if (p_emq->head != p_emq->tail){
 
-        memcpy(p_msg,&g_emq.event[g_emq.head], sizeof(emq_msg_t));
+        //memcpy(p_msg,&p_emq->event[p_emq->head], sizeof(emq_msg_t));
+        p_msg.cmd =           p_emq->event[p_emq->head].cmd       ;
+        p_msg.src =             p_emq->event[p_emq->head].src           ;
+        p_msg.length =      p_emq->event[p_emq->head].length   ;
         //printf("<=%s read event[%d]", p_q->name, p_q->head);
-        (g_emq.head)++;
-        g_emq.read_cnt++;
-        (g_emq.head) %= g_emq.size;
-        g_emq.depth--;
+        (p_emq->head)++;
+        (p_emq->head) %= g_EMQ_FIFO_DEPTH_MAX;
     }
     else{
         p_msg->length = -1;
     }
    //pthread_mutex_unlock(&p_q->lock);
-   pthread_spin_unlock(&g_emq.lock);
+   pthread_spin_unlock(&p_emq->lock);
 }
 
 
