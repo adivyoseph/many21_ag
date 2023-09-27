@@ -8,7 +8,7 @@
 #define CACHELINE_SIZE 64
 #endif
 
-#define EMQ_FIFO_DEPTH_MAX 0x80     //8*16
+#define EMQ_FIFO_DEPTH_MAX 0x90     //8*16
 
 
 typedef struct emq_msg_s {
@@ -32,7 +32,7 @@ typedef struct {
 
 extern void     emq_init(emq_t  *p_emq);
 extern void     emq_write( emq_t  *p_emq, emq_msg_t  *p_msg);
-extern void      emq_read(emq_t  *p_emq, emq_msg_t  *p_msg);
+extern void     emq_read(emq_t  *p_emq, emq_msg_t  *p_msg);
 
 
 #endif

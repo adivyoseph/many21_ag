@@ -14,10 +14,8 @@
 int workq_init(workq_t *p_q) {
     p_q->head = 0;
     p_q->tail = 0;
-    p_q->size = FIFO_DEPTH_MAX; //size;
     //pthread_mutex_init(&p_q->lock, NULL);
     pthread_spin_init(&p_q->lock, PTHREAD_PROCESS_SHARED);
-    memcpy(p_q->name, p_name, 20);
     return 0; 
 }
 
@@ -67,7 +65,7 @@ int workq_read(workq_t *p_q, msg_t *p_msg){
         //memcpy(p_msg,&p_q->event[p_q->head], sizeof(msg_t));
         p_msg->cmd =      p_q->event[p_q->head].cmd     ; 
         p_msg->src =         p_q->event[p_q->head].src        ; 
-        p_msg->length = p_q->event[p_q->head.length ; 
+        p_msg->length = p_q->event[p_q->head].length ; 
         //printf("<=%s read event[%d]", p_q->name, p_q->head);
         (p_q->head)++;
         (p_q->head) %= FIFO_DEPTH_MAX;

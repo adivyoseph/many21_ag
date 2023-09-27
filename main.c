@@ -23,8 +23,10 @@
 #include "emq3.h"
 #include "emq4.h"
 
-#define BILLION  1000000000L;
+#define BILLION  1000000000L
 #define IOGENTHREAD_MAX    16
+
+//volatile  int g_run = 1;
 
 typedef struct ioGenThreadContext_s {
     pthread_t   thread_id;
@@ -34,15 +36,39 @@ typedef struct ioGenThreadContext_s {
     emq_t   emq;
     int id;
     int state;
+
+
+    //stats
+    //common
+    long errors;
+    //io_gen
+    struct timespec start;
+    struct timespec end;
+    long loops;
+    long acks_rec;
+    long req_sent;
+    //aggregator
+    //emulator
+    long req_reads;
+    long req_rec;
+    long req_fwd;
+    long max_n;
+
+
 } ioGenThreadContext_t;
 
 ioGenThreadContext_t   g_contexts[IOGENTHREAD_MAX + 2];
 #define THREAD_AG     (IOGENTHREAD_MAX)
 #define THREAD_EM      (IOGENTHREAD_MAX + 1)
 
+//for stats
+ ioGenThreadContext_t ag_save;
+  ioGenThreadContext_t em_save;
+
+
 typedef struct {
     void (*emq_init)(emq_t  *p_emq);
-    void (*emq_write)emq_t  *p_emq, (emq_msg_t *p_msg);
+    void (*emq_write)(emq_t  *p_emq, emq_msg_t *p_msg);
     void (*emq_read)(emq_t  *p_emq, emq_msg_t *p_msg);
 } sharedq_t;
 
@@ -91,7 +117,7 @@ int main(int argc, char **argv) {
     int total_sent = 0;
     struct timespec start;
     struct timespec end;
-    double accum, accum1;
+    double accum;
     int total_send = 1000000;
     int msgsPerIOGen = 0;
     int first_count = 0;
@@ -147,11 +173,11 @@ int main(int argc, char **argv) {
                         j++;
                     }
                     if(cwork[i] == '\0'){
-                        printf("pin iogen %2d to %s\n", k, work);
+                        //printf("pin iogen %2d to %s\n", k, work);
                         g_contexts[k].setaffinity = atoi(work);
                     }
                     if (cwork[i] == ',') {
-                        printf("pin iogen %2d to %s\n", k, work);
+                        //printf("pin iogen %2d to %s\n", k, work);
                         g_contexts[k].setaffinity = atoi(work);
                         k++;
                         if (k >=  IOGENTHREAD_MAX) {
@@ -171,7 +197,7 @@ int main(int argc, char **argv) {
 
         case 'e':                    //emulator  cpu mapping
                g_contexts[THREAD_EM].setaffinity = atoi(optarg);
-                printf("emulator cpu %d\n", g_contexts[THREAD_EM.setaffinity); 
+                printf("emulator cpu %d\n", g_contexts[THREAD_EM].setaffinity); 
                 break; 
 
 
@@ -182,7 +208,7 @@ int main(int argc, char **argv) {
 
         case 'a':                    //aggegrator cpu
             g_contexts[THREAD_AG].setaffinity = atoi(optarg);
-             printf("aggregator cpu %d\n", g_contexts[THREAD_AG.setaffinity); 
+             printf("aggregator cpu %d\n", g_contexts[THREAD_AG].setaffinity); 
              break; 
 
   
@@ -195,8 +221,6 @@ int main(int argc, char **argv) {
     } 
 
     printf("\n");
-
-    g_emqx.emq_init();
 
     CPU_ZERO(&my_set); 
     if (setaffinity >= 0) {
@@ -221,6 +245,23 @@ int main(int argc, char **argv) {
         workq_init(&g_contexts[i].workq_in);
         workq_init(&g_contexts[i].workq_ack);
         g_emqx.emq_init(&g_contexts[i].emq);
+        if (g_contexts[i].setaffinity >= 0) {
+            if (g_contexts[i].state > 0) {
+                printf(" iogen %2d setaffinity %2d  Active \n", i, g_contexts[i].setaffinity);
+            }
+            else{
+                printf(" iogen %2d setaffinity %2d   \n", i, g_contexts[i].setaffinity);
+            }
+        }
+        else{     
+            if (g_contexts[i].state > 0) {
+                printf(" iogen %2d                                   Active \n",i );
+            }
+            else{
+                printf(" iogen %2d     \n", i );
+            }
+        }
+
     }
 
 //    signal(SIGCLD, SIG_IGN);
@@ -243,7 +284,7 @@ int main(int argc, char **argv) {
             if(workq_read(&g_workq_cli, &msg)){
                 if(msg.cmd == RSP_READY) {
                     i++;
-                    printf("thread %d ready\n", msg.src);
+                    //printf("thread %d ready\n", msg.src);
                 }
              if (i  >= THREAD_EM) {
                  break;
@@ -294,9 +335,47 @@ int main(int argc, char **argv) {
     }
 
     clock_gettime(CLOCK_REALTIME, &end);
+    //snap shot ag and em stats
+
+    ioGenThreadContext_t ag_save;
+     ioGenThreadContext_t em_save;
+    memcpy(&ag_save, &g_contexts[ THREAD_AG],    sizeof(ioGenThreadContext_t ));
+    memcpy(&em_save, &g_contexts[ THREAD_EM],    sizeof(ioGenThreadContext_t ));
     printf("finished total sent %d\n", total_sent);
     accum = ( end.tv_sec - start.tv_sec ) + (double)( end.tv_nsec - start.tv_nsec ) / (double)BILLION;
     printf( "%lf\n", accum );
+
+    //stats
+    printf("io_gen:   cpu     state   loops           ack_rec    req_sent     errors         duration \n");
+    for (i = 0;  i < IOGENTHREAD_MAX; i++) {
+        printf("%2d         %2d      %2d     %lu        %lu      %lu         %lu             %lf\n",
+               i, 
+               g_contexts[i].setaffinity,  
+               g_contexts[i].state,  
+               g_contexts[i].loops,  
+               g_contexts[i].acks_rec,  
+               g_contexts[i].req_sent, 
+                g_contexts[i].errors, 
+               ( g_contexts[i].end.tv_sec - g_contexts[i].start.tv_sec ) + (double)( g_contexts[i].end.tv_nsec - g_contexts[i].start.tv_nsec ) / (double)BILLION
+               );
+    }
+    printf("ag:       cpu             req_reads       req_rec    req_fwd      errors          \n");
+    printf("           %2d              %lu      %lu     %lu         %lu\n",
+           ag_save.setaffinity,
+           ag_save.req_reads,
+           ag_save.req_rec,
+           ag_save.req_fwd,
+           ag_save.errors
+           );
+   printf(" max_n %lu\n", ag_save.max_n);
+    printf("em:       cpu             req_reads       req_rec                 errors          \n");
+    printf("           %2d              %lu      %lu                     %lu\n",
+           em_save.setaffinity,
+           em_save.req_reads,
+           em_save.req_rec,
+           em_save.errors
+           );
+
     return 0;
 }
 
@@ -353,10 +432,13 @@ void *th_func(void *p_arg){
         }
     }
 
+    clock_gettime(CLOCK_REALTIME, &this->start);
     while (1) {
+        this->loops++;
         //track emulator ack window to meter new requests
         if(workq_read(&this->workq_ack, &msg)){
             if (msg.cmd == EM_RSP_ACK) {
+                this->acks_rec++;
                 if (emOutstandingRequests) {
                     emOutstandingRequests --;
                 }
@@ -370,9 +452,11 @@ void *th_func(void *p_arg){
             emq_msg.length = 1;
             g_emqx.emq_write(&this->emq, &emq_msg);
             if (emq_msg.length ) {
+                this->req_sent++;
                 emOutstandingRequests++;
                 send_cnt--;
                 if (send_cnt == 0) {
+                    clock_gettime(CLOCK_REALTIME, &this->end);
                    msg.cmd = RSP_DONE;
                    msg.src = this->id;
                    msg.length = 0;
@@ -404,7 +488,7 @@ void *th_ag(void *p_arg){
     msg_t                 msg;
     emq_msg_t     emq_msg;
     emq_t                *p_emqs[IOGENTHREAD_MAX];
-    int i;
+    int i, n;
 
     //printf("Emulator  PID %d %d\n", getpid(), gettid());
     //build local completion queue look table
@@ -413,7 +497,7 @@ void *th_ag(void *p_arg){
             p_emqs[i] = &g_contexts[i].emq;
         }
         else{
-             p_emqs[i] = NULL:
+             p_emqs[i] = NULL;
         }
     }
 
@@ -431,20 +515,36 @@ void *th_ag(void *p_arg){
     }
 
     i = 0;
+    n = 0;
     while (1){
         if (p_emqs[i] != NULL) {
+            this->req_reads++;
             g_emqx.emq_read(p_emqs[i] , &emq_msg);
             if (emq_msg.length > 0) {
+                this->req_rec++;
+                n =0;
                  g_emqx.emq_write(&this->emq, &emq_msg);
                  if (emq_msg.length == 0) {
+                     this->errors++;
+                 }
+                 else{
+                     this->req_fwd++;
                  }
             }
+            else
+                n++;
         }
         i++;
         if (i >=  IOGENTHREAD_MAX ) {
+            if (this->req_rec ) {
+                if (n > this->max_n) {
+                    this->max_n = n;
+                }
+           }
             i = 0;
         }
     }
+    while (1){}
 }
 
 
@@ -466,7 +566,7 @@ void *th_em(void *p_arg){
     cpu_set_t         my_set;        /* Define your cpu_set bit mask. */
     msg_t                msg;
     emq_msg_t     emq_msg;
-    emq_t *p_workq = g_contexts[THREAD_AG].workq_req;
+    emq_t *p_workq = &g_contexts[THREAD_AG].emq;
     workq_t *p_ackqs[IOGENTHREAD_MAX];
     workq_t *p_workq_ack;
     int i;
@@ -491,14 +591,16 @@ void *th_em(void *p_arg){
         printf("%d q is full\n", this->id);
     }
 
-    while (1){
-          g_emqx.emq_read(p_workq, &emq_msg);
+    while ( 1){
+        this->req_reads++;
+        g_emqx.emq_read(p_workq, &emq_msg);
            if (emq_msg.length > 0) {
+               this->req_rec++;
                //do something
 
 
                //ack
-             p_workq_ack = p_workqs[emq_msg.src];
+             p_workq_ack = p_ackqs[emq_msg.src];
             if( p_workq_ack ){
                 msg.cmd = EM_RSP_ACK;
                 msg.src = this->id;
